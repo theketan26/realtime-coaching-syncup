@@ -5,16 +5,19 @@ var cookieParser = require('cookie-parser');
 var logger = require('morgan');
 var port = 3000;
 
-// Initialize database connection
+// Initialize database and Redis connections
 var pool = require('./db');
+var redisClient = require('./redis');
 
 var indexRouter = require('./routes/index');
 var usersRouter = require('./routes/users');
+var feedRouter = require('./routes/feed');
 
 var app = express();
 
-// Make database pool accessible to routes
+// Make database and Redis accessible to routes
 app.locals.db = pool;
+app.locals.redis = redisClient;
 
 app.use(logger('dev'));
 app.use(express.json());
@@ -24,6 +27,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 app.use('/', indexRouter);
 app.use('/users', usersRouter);
+app.use('/feed', feedRouter);
 
 // catch 404 and forward to error handler
 app.use(function(req, res, next) {
@@ -41,17 +45,21 @@ app.use(function(err, req, res, next) {
   res.render('error');
 });
 
-// Check database connection before starting the server
-pool.query('SELECT NOW()', (err, result) => {
-  if (err) {
-    console.error('Database connection failed:', err);
+// Check database and Redis connections before starting the server
+Promise.all([
+  pool.query('SELECT NOW()'),
+  redisClient.connect(),
+])
+  .then(() => {
+    console.log('Database connected successfully');
+    console.log('Redis connected successfully');
+    app.listen(port, () => {
+      console.log(`Real time coaching app listening on port ${port}`);
+    });
+  })
+  .catch((err) => {
+    console.error('Startup failed:', err);
     process.exit(1);
-  }
-  
-  console.log('Database connected successfully');
-  app.listen(port, () => {
-    console.log(`Real time coaching app listening on port ${port}`);
   });
-});
 
 module.exports = app;
