@@ -21,12 +21,18 @@ export default function Home() {
   const apiUrl = process.env.NEXT_PUBLIC_API_URL;
 
   const socketRef = useRef<any>(null);
+  const [page, setPage] = useState<number>(1);
+  const [pageSize] = useState<number>(10);
+  const [hasMore, setHasMore] = useState<boolean>(true);
+  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
 
   const fetchFeeds = async () => {
     try {
       setLoading(true);
       const response = await axios.get(`${apiUrl}/feed`);
       setFeeds(response.data);
+      setPage(1);
+      setHasMore(Array.isArray(response.data) ? response.data.length === pageSize : false);
       setError(null);
     } catch (err) {
       setError('Failed to fetch feeds');
@@ -53,10 +59,12 @@ export default function Home() {
         socket.on('connect', () => {
           console.log('Socket connected:', socket.id);
           // request initial feed via socket ack
-          socket.emit('getFeed', (payload: any) => {
+          socket.emit('getFeed', { page: 1, pageSize }, (payload: any) => {
             if (!mounted) return;
             if (payload && payload.success) {
               setFeeds(payload.data);
+              setPage(1);
+              setHasMore(Array.isArray(payload.data) ? payload.data.length === pageSize : false);
             }
           });
         });
@@ -100,6 +108,38 @@ export default function Home() {
       console.error('Error adding feed:', err);
     } finally {
       setIsPosting(false);
+    }
+  };
+
+  const loadMore = async () => {
+    if (isLoadingMore) return;
+    const nextPage = page + 1;
+    setIsLoadingMore(true);
+
+    const socket = socketRef.current;
+    const handlePayload = (payload: any) => {
+      if (payload && payload.success) {
+        const items = payload.data || [];
+        setFeeds((prev) => [...prev, ...items]);
+        setPage(nextPage);
+        setHasMore(items.length === pageSize);
+      } else {
+        setHasMore(false);
+      }
+      setIsLoadingMore(false);
+    };
+
+    try {
+      if (socket && socket.connected && typeof socket.emit === 'function') {
+        socket.emit('getFeed', { page: nextPage, pageSize }, handlePayload);
+      } else {
+        // fallback to REST
+        const resp = await axios.get(`${apiUrl}/feed?page=${nextPage}&pageSize=${pageSize}`);
+        handlePayload({ success: true, data: resp.data });
+      }
+    } catch (err) {
+      console.error('Failed to load more feeds', err);
+      setIsLoadingMore(false);
     }
   };
 
@@ -150,6 +190,18 @@ export default function Home() {
             </div>
           ))}
         </div>
+
+        {hasMore && (
+          <div className="flex justify-center mt-6">
+            <button
+              onClick={loadMore}
+              disabled={isLoadingMore}
+              className="px-4 py-2 bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition disabled:opacity-50"
+            >
+              {isLoadingMore ? 'Loading...' : 'Load more'}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Modal */}

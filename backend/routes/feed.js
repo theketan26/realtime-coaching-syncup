@@ -5,7 +5,10 @@ var router = express.Router();
 router.get('/', async function(req, res, next) {
   const db = req.app.locals.db;
   const redis = req.app.locals.redis;
-  const cacheKey = 'feed:all';
+  const page = parseInt(req.query.page, 10) || 1;
+  const pageSize = parseInt(req.query.pageSize, 10) || 10;
+  const offset = (page - 1) * pageSize;
+  const cacheKey = `feed:all:page:${page}:size:${pageSize}`;
 
   try {
     const cached = await redis.get(cacheKey);
@@ -16,7 +19,7 @@ router.get('/', async function(req, res, next) {
     console.warn('Redis cache read failed:', cacheErr.message);
   }
 
-  db.query('SELECT * FROM feed ORDER BY created_at DESC', async (err, result) => {
+  db.query('SELECT * FROM feed ORDER BY created_at DESC LIMIT $1 OFFSET $2', [pageSize, offset], async (err, result) => {
     if (err) {
       return res.status(500).json({ error: 'Database error', details: err.message });
     }
@@ -52,7 +55,11 @@ router.post('/', function(req, res, next) {
       }
 
       try {
-        await redis.del(cacheKey);
+        // Invalidate any paginated feed caches
+        const keys = await redis.keys('feed:all:*');
+        if (keys && keys.length) {
+          await redis.del(keys);
+        }
       } catch (cacheErr) {
         console.warn('Redis cache invalidation failed:', cacheErr.message);
       }
