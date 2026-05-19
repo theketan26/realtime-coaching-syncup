@@ -57,6 +57,11 @@ router.post('/', function(req, res, next) {
         console.warn('Redis cache invalidation failed:', cacheErr.message);
       }
 
+      const io = req.app.locals.io;
+      if (io) {
+        io.emit('newFeed', result.rows[0]);
+      }
+
       res.status(201).json(result.rows[0]);
     }
   );

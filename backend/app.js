@@ -3,6 +3,8 @@ var express = require('express');
 var path = require('path');
 var cookieParser = require('cookie-parser');
 var logger = require('morgan');
+var http = require('http');
+var { Server } = require('socket.io');
 var port = 3000;
 
 // Initialize database and Redis connections
@@ -12,8 +14,10 @@ var redisClient = require('./redis');
 var indexRouter = require('./routes/index');
 var usersRouter = require('./routes/users');
 var feedRouter = require('./routes/feed');
+var createFeedSocketHandler = require('./sockets/createFeedSocketHandler');
 
 var app = express();
+var server = http.createServer(app);
 
 // Make database and Redis accessible to routes
 app.locals.db = pool;
@@ -45,6 +49,28 @@ app.use(function(err, req, res, next) {
   res.render('error');
 });
 
+let io;
+
+function createSocketServer() {
+  io = new Server(server, {
+    cors: {
+      origin: '*',
+      methods: ['GET', 'POST'],
+    },
+  });
+
+  app.locals.io = io;
+
+  io.on('connection', (socket) => {
+    console.log('Socket connected:', socket.id);
+    createFeedSocketHandler(socket, app);
+
+    socket.on('disconnect', () => {
+      console.log('Socket disconnected:', socket.id);
+    });
+  });
+}
+
 // Check database and Redis connections before starting the server
 Promise.all([
   pool.query('SELECT NOW()'),
@@ -53,7 +79,8 @@ Promise.all([
   .then(() => {
     console.log('Database connected successfully');
     console.log('Redis connected successfully');
-    app.listen(port, () => {
+    createSocketServer();
+    server.listen(port, () => {
       console.log(`Real time coaching app listening on port ${port}`);
     });
   })
