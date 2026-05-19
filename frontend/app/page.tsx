@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 
 interface Feed {
@@ -20,6 +20,8 @@ export default function Home() {
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL;
 
+  const socketRef = useRef<any>(null);
+
   const fetchFeeds = async () => {
     try {
       setLoading(true);
@@ -36,6 +38,48 @@ export default function Home() {
 
   useEffect(() => {
     fetchFeeds();
+
+    // Setup Socket.IO client for realtime updates
+    let mounted = true;
+    const setupSocket = async () => {
+      try {
+        const { io } = await import('socket.io-client');
+        const socketUrl = apiUrl || 'http://localhost:3000';
+        const socket = io(socketUrl, { transports: ['websocket'] });
+
+        // store on ref so we can disconnect on unmount
+        socketRef.current = socket;
+
+        socket.on('connect', () => {
+          console.log('Socket connected:', socket.id);
+          // request initial feed via socket ack
+          socket.emit('getFeed', (payload: any) => {
+            if (!mounted) return;
+            if (payload && payload.success) {
+              setFeeds(payload.data);
+            }
+          });
+        });
+
+        socket.on('newFeed', (feed: Feed) => {
+          if (!mounted) return;
+          setFeeds((prev) => [feed, ...prev]);
+        });
+
+        socket.on('disconnect', () => console.log('Socket disconnected'));
+      } catch (err) {
+        console.warn('Socket.IO client failed to load or connect', err);
+      }
+    };
+
+    setupSocket();
+
+    return () => {
+      mounted = false;
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
+    };
   }, []);
 
   const handleAddFeed = async () => {
@@ -50,7 +94,7 @@ export default function Home() {
       await axios.post(`${apiUrl}/feed`, { message: newMessage });
       setNewMessage('');
       setIsModalOpen(false);
-      await fetchFeeds();
+      // no need to manually fetch; backend emits `newFeed`
     } catch (err) {
       setPostError('Failed to add feed');
       console.error('Error adding feed:', err);
